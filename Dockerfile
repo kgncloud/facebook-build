@@ -38,7 +38,9 @@ RUN apk add --virtual .build-deps python3-dev libffi-dev build-base \
  && apk del .build-deps
 
 COPY . /opt/mautrix-facebook
-RUN apk add --no-cache git && pip3 install .[e2be] && apk del git \
+RUN apk add --no-cache git && \
+  pip install -e git+https://github.com/mautrix/python@ec46ec9857d2b9a469eb7bbc9612e0543c6471e4#egg=mautrix && \
+  pip3 install .[e2be] && apk del git \
   # This doesn't make the image smaller, but it's needed so that the `version` command works properly
   && cp mautrix_facebook/example-config.yaml . && rm -rf mautrix_facebook
 
