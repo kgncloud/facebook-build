@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Pattern, cast
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Pattern, Union, cast
 from collections import deque
 from datetime import datetime, timedelta
 from html import escape
@@ -39,6 +39,7 @@ from mautrix.types import (
     BatchSendMessageEvent,
     BatchSendStateEvent,
     ContentURI,
+    EncryptedEventContent,
     EncryptedFile,
     EventID,
     EventType,
@@ -51,7 +52,6 @@ from mautrix.types import (
     MemberStateEventContent,
     MessageEventContent,
     MessageType,
-    RelationType,
     RoomID,
     TextMessageEventContent,
     UserID,
@@ -106,7 +106,7 @@ BackfillEndDummyEvent = EventType.find("fi.mau.dummy.backfill_end", EventType.Cl
 RoomMarker = EventType.find("m.room.marker", EventType.Class.MESSAGE)
 MSC2716Marker = EventType.find("org.matrix.msc2716.marker", EventType.Class.MESSAGE)
 
-ConvertedMessage = tuple[EventType, MessageEventContent]
+ConvertedMessage = tuple[EventType, Union[MessageEventContent, EncryptedEventContent]]
 
 BACKFILL_ID_FIELD = "fi.mau.facebook.backfill_msg_id"
 
