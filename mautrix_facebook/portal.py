@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Pattern, Union, cast
-from collections import deque
+from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from html import escape
 from io import BytesIO
@@ -1059,6 +1059,7 @@ class Portal(DBPortal, BasePortal):
         event_ids: list[EventID],
         message_map: dict[str | None, graphql.Message | mqtt.Message],
     ):
+        event_id_idx: defaultdict[str, int] = defaultdict(int)
         for event_id in event_ids:
             try:
                 event = await self.az.intent.get_event(self.mxid, event_id)
@@ -1075,10 +1076,11 @@ class Portal(DBPortal, BasePortal):
                     if isinstance(message, graphql.Message)
                     else message.metadata.timestamp
                 )
+
                 await DBMessage(
                     mxid=event_id,
                     mx_room=self.mxid,
-                    index=0,
+                    index=event_id_idx[message_id],
                     timestamp=timestamp,
                     fbid=message_id,
                     fb_chat=self.fbid,
@@ -1086,6 +1088,8 @@ class Portal(DBPortal, BasePortal):
                     fb_sender=int(message.message_sender.id),
                     fb_txn_id=int(message.offline_threading_id),
                 ).insert()
+
+                event_id_idx[message_id] += 1
             except Exception:
                 self.log.exception("Failed to finish batch")
 
