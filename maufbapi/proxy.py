@@ -1,13 +1,17 @@
+from typing import Optional
 import json
 import logging
 import urllib.request
 
 
 class ProxyHandler:
-    current_proxy_url: str | None = None
+    current_proxy_url: Optional[str] = None
     log = logging.getLogger("maufbapi.proxy")
 
-    def get_proxy_url_from_api(self) -> str | None:
+    def __init__(self, api_url: str) -> None:
+        self.api_url = api_url
+
+    def get_proxy_url_from_api(self) -> Optional[str]:
         request = urllib.request.Request(self.api_url, method="GET")
 
         try:
@@ -23,7 +27,7 @@ class ProxyHandler:
         new_proxy = None
 
         if self.api_url is not None:
-            new_proxy = self.get_proxy_url_from_api(self.api_url)
+            new_proxy = self.get_proxy_url_from_api()
         else:
             new_proxy = urllib.request.getproxies().get("http")
 
@@ -33,7 +37,7 @@ class ProxyHandler:
 
         return old_proxy != new_proxy
 
-    def get_proxy_url(self) -> str | None:
+    def get_proxy_url(self) -> Optional[str]:
         if not self.current_proxy_url:
             self.update_proxy_url()
 
