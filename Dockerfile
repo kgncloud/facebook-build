@@ -3,7 +3,10 @@ FROM docker.io/alpine:3.15
 ARG TARGETARCH=amd64
 
 RUN apk add --no-cache \
-      python3 py3-pip py3-setuptools py3-wheel \
+      python3 \
+	  py3-pip=22.0.4-r0 \
+	  py3-setuptools \
+	  py3-wheel \
       py3-pillow \
       py3-aiohttp \
       py3-magic \
@@ -27,7 +30,7 @@ RUN apk add --no-cache \
       netcat-openbsd \
       bash \
       curl \
-      'jq>1.6_rc1-r0' \
+      jq=1.6_rc1-r0 \
       yq
 
 COPY requirements.txt /opt/mautrix-facebook/requirements.txt
