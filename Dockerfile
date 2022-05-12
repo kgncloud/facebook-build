@@ -27,7 +27,7 @@ RUN apk add --no-cache \
       netcat-openbsd \
       bash \
       curl \
-      jq \
+      'jq>1.6_rc1-r0' \
       yq
 
 COPY requirements.txt /opt/mautrix-facebook/requirements.txt
