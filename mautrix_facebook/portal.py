@@ -331,6 +331,7 @@ class Portal(DBPortal, BasePortal):
             raise ValueError("URL not provided")
         headers = {"referer": f"fbapp://{source.state.application.client_id}/{referer}"}
         sandbox = cls.config["bridge.sandbox_media_download"]
+        cls.log.trace("Reuploading file %s", url)
         async with source.client.get(url, headers=headers, sandbox=sandbox) as resp:
             length = int(resp.headers["Content-Length"])
             if length > cls.matrix.media_config.upload_size:
@@ -1358,8 +1359,20 @@ class Portal(DBPortal, BasePortal):
                 if sa.description and sa.description.text != "msngr.com":
                     body += f"\n\n>{sa.description.text}"
                     html += f"<blockquote>{escape(sa.description.text)}</blockquote>"
-                body += f"\n\n{sa.url}"
-                html += f"<p><a href='{sa.url}'>Open external link</a></p>"
+                if sa.url:
+                    body += f"\n\n{sa.url}"
+                    html += f"<p><a href='{sa.url}'>Open external link</a></p>"
+                elif sa.action_links:
+                    urls = [item.url for item in sa.action_links if item.url]
+                    if len(urls) > 0:
+                        sa.url = urls[0]
+                        body += f"\n\n" + " - ".join(urls)
+                        html_parts = [
+                            f"""<a href="{item.url}">{item.title}</a>"""
+                            for item in sa.action_links
+                            if item.url
+                        ]
+                        html += f"""<p>{" - ".join(html_parts)}</p>"""
                 return TextMessageEventContent(
                     msgtype=MessageType.TEXT,
                     format=Format.HTML,
@@ -1380,7 +1393,8 @@ class Portal(DBPortal, BasePortal):
                 )
             info.size = additional_info.size
             info.mimetype = additional_info.mimetype
-            filename = f"{sa.media.typename_str}{mimetypes.guess_extension(info.mimetype)}"
+            title = sa.title or sa.media.typename_str
+            filename = f"{title}{mimetypes.guess_extension(info.mimetype)}"
             return MediaMessageEventContent(
                 url=mxc,
                 file=decryption_info,
