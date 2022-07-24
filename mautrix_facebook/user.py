@@ -23,9 +23,9 @@ import time
 
 from aiohttp import ClientConnectionError
 
-from maufbapi import AndroidAPI, AndroidMQTT, AndroidState
+from maufbapi import AndroidAPI, AndroidMQTT, AndroidState, ProxyHandler
 from maufbapi.http import InvalidAccessToken, ResponseError
-from maufbapi.mqtt import Connect, Disconnect, MQTTNotConnected, MQTTNotLoggedIn
+from maufbapi.mqtt import Connect, Disconnect, MQTTNotConnected, MQTTNotLoggedIn, ProxyUpdate
 from maufbapi.types import graphql, mqtt as mqtt_t
 from mautrix.bridge import BaseUser, async_getter_lock
 from mautrix.errors import MNotFound
@@ -171,6 +171,10 @@ class User(DBUser, BaseUser):
         self.mqtt = None
         self.listen_task = None
 
+        self.proxy_handler = ProxyHandler(
+            api_url=self.config["bridge.get_proxy_api_url"],
+        )
+
     @classmethod
     def init_cls(cls, bridge: "MessengerBridge") -> AsyncIterable[Awaitable[bool]]:
         cls.bridge = bridge
@@ -287,7 +291,11 @@ class User(DBUser, BaseUser):
         self.state.device.connection_type = self.config["facebook.connection_type"]
         self.state.carrier.name = self.config["facebook.carrier"]
         self.state.carrier.hni = self.config["facebook.hni"]
-        client = AndroidAPI(self.state, log=self.log.getChild("api"))
+        client = AndroidAPI(
+            self.state,
+            log=self.log.getChild("api"),
+            proxy_handler=self.proxy_handler,
+        )
         user_info = await self.fetch_logged_in_user(client)
         if user_info:
             self.log.info("Loaded session successfully")
@@ -317,7 +325,10 @@ class User(DBUser, BaseUser):
         await self.logout(remove_fbid=False, from_auth_error=True)
 
     async def fetch_logged_in_user(
-        self, client: AndroidAPI | None = None, action: str = "restore session"
+        self,
+        client: AndroidAPI | None = None,
+        action: str = "restore session",
+        refresh_proxy_on_failure: bool = False,
     ) -> None:
         if not client:
             client = self.client
@@ -344,6 +355,9 @@ class User(DBUser, BaseUser):
                     f"retrying in {wait} seconds: {e}"
                 )
                 await asyncio.sleep(wait)
+                if refresh_proxy_on_failure:
+                    self.proxy_handler.update_proxy_url()
+                    await self.on_proxy_update()
             except ResponseError:
                 if action != "restore session":
                     attempt += 1
@@ -392,14 +406,14 @@ class User(DBUser, BaseUser):
                 else:
                     self.log.debug("MQTT connection disconnected")
             self.mqtt = None
-            if self.client:
-                self.client.sequence_id_callback = None
         if self.temp_disconnect_notices or force_notice:
             event_id = await self.send_bridge_notice(
                 "Refreshing session...",
                 edit=event_id,
                 state_event=BridgeStateEvent.TRANSIENT_DISCONNECT,
             )
+        self.client = None
+        self.proxy_handler.update_proxy_url()
         await self.reload_session(event_id)
 
     async def reload_session(
@@ -446,9 +460,14 @@ class User(DBUser, BaseUser):
         await self.listen_task
         self.listen_task = None
         self.mqtt = None
+        self.proxy_handler.update_proxy_url()
+        await self.on_proxy_update()
         if fetch_user:
             self.log.debug("Fetching current user after MQTT disconnection")
-            await self.fetch_logged_in_user(action="fetch current user after MQTT disconnection")
+            await self.fetch_logged_in_user(
+                action="fetch current user after MQTT disconnection",
+                refresh_proxy_on_failure=True,  # safe because MQTT is dropped
+            )
         self.start_listen()
         self._is_refreshing = False
 
@@ -727,6 +746,7 @@ class User(DBUser, BaseUser):
                     self.state,
                     log=self.log.getChild("mqtt"),
                     connect_token_hash=self.connect_token_hash,
+                    proxy_handler=self.proxy_handler,
                 )
                 self.mqtt.seq_id_update_callback = self._update_seq_id
                 self.mqtt.region_hint_callback = self._update_region_hint
@@ -749,6 +769,7 @@ class User(DBUser, BaseUser):
                 self.mqtt.add_event_handler(mqtt_t.ForcedFetch, self.on_forced_fetch)
                 self.mqtt.add_event_handler(Connect, self.on_connect)
                 self.mqtt.add_event_handler(Disconnect, self.on_disconnect)
+                self.mqtt.add_event_handler(ProxyUpdate, self.on_proxy_update)
             await self.mqtt.listen(self.seq_id)
             self.is_connected = False
             if not self._is_refreshing and not self.shutdown:
@@ -827,6 +848,10 @@ class User(DBUser, BaseUser):
             await self.send_bridge_notice(f"Disconnected from Facebook Messenger: {evt.reason}")
         await self.push_bridge_state(BridgeStateEvent.TRANSIENT_DISCONNECT, message=evt.reason)
 
+    async def on_proxy_update(self, evt: ProxyUpdate | None = None) -> None:
+        if self.client:
+            self.client.setup_http()
+
     def stop_listen(self) -> None:
         if self.mqtt:
             self.mqtt.disconnect()
@@ -840,7 +865,11 @@ class User(DBUser, BaseUser):
         self.fbid = state.session.uid
         await self.push_bridge_state(BridgeStateEvent.CONNECTING)
         self.state = state
-        self.client = AndroidAPI(state, log=self.log.getChild("api"))
+        self.client = AndroidAPI(
+            state,
+            log=self.log.getChild("api"),
+            proxy_handler=self.proxy_handler,
+        )
         await self.save()
         try:
             self._logged_in_info = await self.client.fetch_logged_in_user(post_login=True)
@@ -988,6 +1017,9 @@ class User(DBUser, BaseUser):
             target = int(evt.action_data["participant_id"])
             puppet = await pu.Puppet.get_by_fbid(target)
             await portal.sync_per_room_nick(puppet, evt.action_data["nickname"])
+        elif evt.action == mqtt_t.ThreadChangeAction.POLL:
+            puppet = await pu.Puppet.get_by_fbid(evt.metadata.sender)
+            await portal.handle_facebook_poll(puppet, evt)
 
         # TODO
         # elif evt.action == mqtt_t.ThreadChangeAction.ADMINS:

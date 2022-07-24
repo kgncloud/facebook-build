@@ -25,7 +25,6 @@ import logging
 import pkgutil
 import random
 import time
-import urllib.request
 
 from aiohttp import ClientResponse, ClientSession
 from aiohttp.client import _RequestContextManager
@@ -36,6 +35,7 @@ import zstandard as zstd
 from mautrix.types import JSON
 from mautrix.util.logging import TraceLogger
 
+from ..proxy import ProxyHandler
 from ..state import AndroidState
 from ..types import GraphQLMutation, GraphQLQuery
 from .errors import GraphQLError, ResponseError, ResponseTypeError, error_class_map, error_code_map
@@ -77,21 +77,17 @@ class BaseAndroidAPI:
     # Seems to be a per-request incrementing integer
     _tid: int
 
-    def __init__(self, state: AndroidState, log: TraceLogger | None = None) -> None:
-        self.log = log or logging.getLogger("mauigpapi.http")
+    def __init__(
+        self,
+        state: AndroidState,
+        log: TraceLogger | None = None,
+        proxy_handler: ProxyHandler | None = None,
+    ) -> None:
+        self.log = log or logging.getLogger("maufbapi.http")
 
-        connector = None
-        try:
-            http_proxy = urllib.request.getproxies()["http"]
-        except KeyError:
-            pass
-        else:
-            if ProxyConnector:
-                connector = ProxyConnector.from_url(http_proxy)
-            else:
-                self.log.warning("http_proxy is set, but aiohttp-socks is not installed")
+        self.proxy_handler = proxy_handler
+        self.setup_http()
 
-        self.http = ClientSession(connector=connector)
         self.state = state
         self._cid = ""
         self._cid_ts = 0
@@ -159,6 +155,18 @@ class BaseAndroidAPI:
             "client_country_code": self.state.device.country_code,
         }
 
+    def setup_http(self) -> None:
+        connector = None
+        http_proxy = self.proxy_handler.get_proxy_url()
+        if http_proxy:
+            if ProxyConnector:
+                connector = ProxyConnector.from_url(http_proxy)
+            else:
+                self.log.warning("http_proxy is set, but aiohttp-socks is not installed")
+
+        self.http = ClientSession(connector=connector)
+        return None
+
     def get(
         self,
         url: str | URL,
@@ -174,10 +182,10 @@ class BaseAndroidAPI:
         orig_url = url
         url = URL(url)
         if "/" in url.query_string:
-            # Hacky hacks for forcing encoded slashes in query parameters.
-            # Normally yarl/aiohttp forces decoding slashes in query parameters, but Facebook's
-            # CDN doesn't like that (the reason there are slashes in the URL in the first place
-            # is thatFacebook hasn't heard of URL-safe base64).
+            # Hacky hacks for forcing encoded slashes in query parameters. Normally yarl/aiohttp
+            # forces decoding slashes in query parameters, but that breaks Facebook's URL signature
+            # and the CDN rejects the request. (the reason there are slashes in the URL in the
+            # first place is presumably that Facebook hasn't heard of URL-safe base64).
             urlparsed = urlparse(orig_url)
             url = url.with_query(None).with_path(
                 f"{urlparsed.path}?{urlparsed.query}", encoded=True

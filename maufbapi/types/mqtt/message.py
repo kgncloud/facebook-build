@@ -241,6 +241,7 @@ class Presence(SerializableAttrs):
 
 class MentionType(SerializableEnum):
     PERSON = "p"
+    SILENT = "s"
     THREAD = "t"
 
 
@@ -536,6 +537,12 @@ class ThreadChangeAction(ExtensibleEnum):
     #   'nickname': '<per-room displayname>'
     #   'participant_id': '<user id>'
     NICKNAME = "change_thread_nickname"
+
+    # action_data:
+    #    'added_option_ids': '<option ids>' (this is a string with a list inside)
+    #    'removed_option_ids': '<option ids>' (this is a string with a list inside)
+    #    'question_json': JSON of the question
+    POLL = "group_poll"
 
 
 @autospec

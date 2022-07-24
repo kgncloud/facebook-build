@@ -85,12 +85,9 @@ class Config(BaseBridgeConfig):
             copy("bridge.login_shared_secret_map")
         copy("bridge.presence_from_facebook")
         copy("bridge.update_avatar_initial_sync")
-        copy("bridge.encryption.allow")
-        copy("bridge.encryption.default")
-        copy("bridge.encryption.key_sharing.allow")
-        copy("bridge.encryption.key_sharing.require_cross_signing")
-        copy("bridge.encryption.key_sharing.require_verification")
         copy("bridge.delivery_receipts")
+        copy("bridge.delivery_error_reports")
+        copy("bridge.message_status_events")
         copy("bridge.federate_rooms")
         copy("bridge.allow_invites")
         copy("bridge.backfill.invite_own_puppet")
@@ -128,6 +125,8 @@ class Config(BaseBridgeConfig):
         copy("bridge.sandbox_media_download")
 
         copy_dict("bridge.permissions")
+
+        copy("bridge.get_proxy_api_url")
 
         for key in (
             "bridge.periodic_reconnect.interval",
