@@ -67,6 +67,7 @@ class TwoFactorRequired(OAuthException):
         self.machine_id = tfa_data.get("machine_id")
         self.auth_token = tfa_data["auth_token"]
         self.uid = tfa_data["uid"]
+        self.user_message = data["error_user_msg"]
 
 
 class InvalidEmail(OAuthException):
@@ -81,11 +82,16 @@ class GraphMethodException(ResponseError):
     pass
 
 
+class RateLimitExceeded(ResponseError):
+    pass
+
+
 error_code_map = {
     190: InvalidAccessToken,
     400: InvalidEmail,
     401: IncorrectPassword,
     406: TwoFactorRequired,
+    3252001: RateLimitExceeded,
 }
 _error_classes = (OAuthException, GraphMethodException)
 error_class_map = {clazz.__name__: clazz for clazz in _error_classes}

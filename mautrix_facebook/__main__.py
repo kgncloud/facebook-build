@@ -63,10 +63,12 @@ class MessengerBridge(Bridge):
         if self.config["appservice.public.enabled"]:
             secret = self.config["appservice.public.shared_secret"]
             segment_key = self.config["appservice.public.segment_key"]
+            segment_user_id = self.config["appservice.public.segment_user_id"]
             self.public_website = PublicBridgeWebsite(
                 loop=self.loop,
                 shared_secret=secret,
                 segment_key=segment_key,
+                segment_user_id=segment_user_id,
             )
             self.az.app.add_subapp(
                 self.config["appservice.public.prefix"], self.public_website.app
@@ -88,6 +90,7 @@ class MessengerBridge(Bridge):
         User.shutdown = True
         for user in User.by_fbid.values():
             user.stop_listen()
+            user.stop_backfill_tasks()
         self.add_shutdown_actions(user.save() for user in User.by_mxid.values())
 
     async def start(self) -> None:

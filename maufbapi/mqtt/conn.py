@@ -62,7 +62,7 @@ except ImportError:
 T = TypeVar("T")
 no_prefix_topics = (RealtimeTopic.TYPING_NOTIFICATION, RealtimeTopic.ORCA_PRESENCE)
 fb_topic_regex = re.compile(r"^(?P<topic>/[a-z_]+|\d+)(?P<extra>[|/#].+)?$")
-REQUEST_TIMEOUT = 60
+REQUEST_TIMEOUT = 30
 
 
 # TODO add some custom stuff in these?
@@ -167,26 +167,18 @@ class AndroidMQTT:
                     proxy_password=proxy_url.password,
                 )
 
-    def _clear_response_waiters(self) -> None:
-        for waiter in self._response_waiters.values():
-            if not waiter.done():
-                waiter.set_exception(
-                    MQTTNotConnected("MQTT disconnected before request returned response")
-                )
+    def _clear_publish_waiters(self) -> None:
         for waiter in self._publish_waiters.values():
             if not waiter.done():
-                waiter.set_exception(
-                    MQTTNotConnected("MQTT disconnected before request was published")
-                )
-        self._response_waiters = {}
+                waiter.set_exception(MQTTNotConnected("MQTT disconnected before PUBACK received"))
         self._publish_waiters = {}
 
     def _form_client_id(self, force_password: bool = False) -> bytes:
         subscribe_topics = [
-            "/t_assist_rp",
+            RealtimeTopic.PRESENCE,
             "/t_rtc",
-            "/webrtc_response",
             "/t_rtc_log",
+            "/webrtc_response",
             RealtimeTopic.MESSAGE_SYNC,
             "/pp",
             "/webrtc",
@@ -202,8 +194,9 @@ class AndroidMQTT:
             "/t_trace",
             RealtimeTopic.TYPING_NOTIFICATION,
             "/sr_res",
-            "/ls_resp",
+            "/t_sp",
             "/t_rtc_multi",
+            "/ls_resp",
             # RealtimeTopic.SEND_MESSAGE_RESP,
             # RealtimeTopic.MARK_THREAD_READ_RESPONSE,
         ]
@@ -220,7 +213,7 @@ class AndroidMQTT:
             client_info=RealtimeClientInfo(
                 user_id=self.state.session.uid,
                 user_agent=self.state.user_agent_meta,
-                client_capabilities=0b1100001110110111,
+                client_capabilities=0b110110111,
                 endpoint_capabilities=0b1011010,
                 publish_format=2,
                 no_automatic_foreground=True,
@@ -235,7 +228,7 @@ class AndroidMQTT:
                 app_id=int(self.state.application.client_id),
                 region_preference=self.state.session.region_hint,
                 device_secret="",
-                client_stack=4,
+                client_stack=3,
                 network_type_info=7 if self.state.device.connection_type == "WIFI" else 4,
             ),
             password=self.state.session.access_token,
@@ -294,12 +287,12 @@ class AndroidMQTT:
     def _on_disconnect_handler(self, client: MQTToTClient, _: Any, rc: int) -> None:
         err_str = "Generic error." if rc == pmc.MQTT_ERR_NOMEM else pmc.error_string(rc)
         self.log.debug(f"MQTT disconnection code %d: %s", rc, err_str)
-        self._clear_response_waiters()
+        self._clear_publish_waiters()
 
     @property
     def _sync_queue_params(self) -> dict[str, Any]:
         return {
-            "client_delta_sync_bitmask": "CAvV/nxib6vRgAV/ss2A",
+            "client_delta_sync_bitmask": "1AgP1f58Ym+r0YAFf7LNgA",
             "graphql_query_hashes": {"xma_query_id": "0"},
             "graphql_query_params": {
                 "0": {
@@ -316,7 +309,7 @@ class AndroidMQTT:
                         "pixel_ratio": 3,
                     },
                     "use_oss_id": True,
-                    "client_doc_id": "222672581515007895135860332111",
+                    "client_doc_id": "22267258153674992339648494933",
                 }
             },
         }
@@ -456,6 +449,9 @@ class AndroidMQTT:
                 self._on_typing_notification(message.payload)
             elif topic == RealtimeTopic.ORCA_PRESENCE:
                 self._on_presence(message.payload)
+            elif topic == RealtimeTopic.PRESENCE:
+                # TODO remove orca_presence support and use this instead
+                self.log.trace("Got presence payload: %s", message.payload)
             elif topic == RealtimeTopic.REGION_HINT:
                 self._on_region_hint(message.payload)
             else:
@@ -584,7 +580,12 @@ class AndroidMQTT:
     # region Basic outgoing MQTT
 
     @staticmethod
-    def _cancel_later(fut: asyncio.Future) -> None:
+    def _publish_cancel_later(fut: asyncio.Future) -> None:
+        if not fut.done():
+            fut.set_exception(asyncio.TimeoutError("MQTT publish timed out"))
+
+    @staticmethod
+    def _request_cancel_later(fut: asyncio.Future) -> None:
         if not fut.done():
             fut.set_exception(asyncio.TimeoutError("MQTT request timed out"))
 
@@ -609,8 +610,8 @@ class AndroidMQTT:
             topic.encoded if isinstance(topic, RealtimeTopic) else topic, payload, qos=1
         )
         fut = self._loop.create_future()
-        timeout_handle = self._loop.call_later(REQUEST_TIMEOUT, self._cancel_later, fut)
-        fut.add_done_callback(timeout_handle.cancel)
+        timeout_handle = self._loop.call_later(REQUEST_TIMEOUT, self._publish_cancel_later, fut)
+        fut.add_done_callback(lambda _: timeout_handle.cancel())
         self._publish_waiters[info.mid] = fut
         return fut
 
@@ -624,9 +625,20 @@ class AndroidMQTT:
         async with self._response_waiter_locks[response]:
             fut = self._loop.create_future()
             self._response_waiters[response] = fut
-            await self.publish(topic, payload, prefix)
-            timeout_handle = self._loop.call_later(REQUEST_TIMEOUT, self._cancel_later, fut)
-            fut.add_done_callback(timeout_handle.cancel)
+            try:
+                await self.publish(topic, payload, prefix)
+            except asyncio.TimeoutError:
+                self.log.warning("Publish timed out - try forcing reconnect")
+                self._client.reconnect()
+            except MQTTNotConnected:
+                self.log.warning(
+                    "MQTT disconnected before PUBACK - wait a hot minute, we should get "
+                    "the response after we auto reconnect"
+                )
+            timeout_handle = self._loop.call_later(
+                REQUEST_TIMEOUT, self._request_cancel_later, fut
+            )
+            fut.add_done_callback(lambda _: timeout_handle.cancel())
             return await fut
 
     @staticmethod

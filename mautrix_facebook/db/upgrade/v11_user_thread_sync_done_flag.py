@@ -1,5 +1,5 @@
 # mautrix-facebook - A Matrix-Facebook Messenger puppeting bridge.
-# Copyright (C) 2021 Tulir Asokan
+# Copyright (C) 2022 Tulir Asokan, Sumner Evans
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -13,22 +13,13 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from mautrix.types import ExtensibleEnum, SerializableEnum
+from mautrix.util.async_db import Connection
+
+from . import upgrade_table
 
 
-class MessageUnsendability(ExtensibleEnum):
-    DENY_FOR_NON_SENDER = "deny_for_non_sender"
-    DENY_LOG_MESSAGE = "deny_log_message"
-    DENY_TOMBSTONE_MESSAGE = "deny_tombstone_message"
-    DENY_IF_PAGE_THREAD = "deny_if_page_thread"
-    DENY_IF_CANNOT_REPLY_TO_VIEWER_THREAD = "deny_if_cannot_reply_to_viewer_thread"
-    DENY_IF_MARKETPLACE_THREAD = "deny_if_marketplace_thread"
-    CAN_UNSEND = "can_unsend"
-
-
-class ThreadFolder(SerializableEnum):
-    INBOX = "INBOX"
-    PENDING = "PENDING"
-    ARCHIVED = "ARCHIVED"
-    OTHER = "OTHER"
-    COMMUNITY = "COMMUNITY"
+@upgrade_table.register(description="Add flag for users to mark thread sync as completed")
+async def upgrade_v11(conn: Connection) -> None:
+    await conn.execute(
+        'ALTER TABLE "user" ADD COLUMN thread_sync_completed BOOLEAN NOT NULL DEFAULT false'
+    )

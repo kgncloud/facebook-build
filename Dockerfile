@@ -1,6 +1,4 @@
-FROM docker.io/alpine:3.16
-
-ARG TARGETARCH=amd64
+FROM docker.io/alpine:3.17
 
 RUN apk add --no-cache \
       python3 \

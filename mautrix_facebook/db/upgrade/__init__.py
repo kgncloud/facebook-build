@@ -10,4 +10,8 @@ from . import (
     v05_remove_communities,
     v06_store_user_seq_id,
     v07_store_reaction_timestamp,
+    v08_backfill_queue,
+    v09_portal_infinite_backfill,
+    v10_user_thread_sync_status,
+    v11_user_thread_sync_done_flag,
 )
